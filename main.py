@@ -57,6 +57,13 @@ def main() -> None:
     conv_handler = build_conversation_handler()
     app.add_handler(conv_handler)
 
+    # ── START RENDER KEEP ALIVE (WEB SERVICE COMPATIBILITY) ──
+    try:
+        from keep_alive import keep_alive
+        keep_alive()
+    except Exception as e:
+        logger.warning("Failed to start keep_alive server: %s", e)
+
     # Start polling
     logger.info(
         "🐋 Whale Copy Trading Bot started! Allowed users: %s",
