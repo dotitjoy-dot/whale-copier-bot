@@ -18,7 +18,7 @@ from bot.menus import *
 from core.database import Database
 from core.logger import get_logger
 from core.scheduler import Scheduler
-from bot.middlewares import AuthMiddleware
+from core.auth_manager import AuthManager
 from monitor.whale_tracker import WhaleTracker
 from trading.copy_engine import CopyEngine
 from trading.auto_sniper import AutoSniper
@@ -27,13 +27,18 @@ from trading.price_alert_monitor import PriceAlertMonitor
 from trading.limit_order_monitor import LimitOrderMonitor
 
 # Import handlers
-from bot.handlers.start import start_command, handle_passphrase, show_dashboard
+from bot.handlers.start import (
+    start_command, handle_passphrase, show_dashboard,
+    handle_license_key_input, prompt_license_key,
+    AUTH_LICENSE_KEY,
+)
 from bot.handlers.chains import chain_select_callback, chain_switch_callback
 from bot.handlers.wallet import (
     wallet_menu, wallet_balance, wallet_create_chain, wallet_create_chain_selected,
     wallet_create_label, wallet_create_passphrase, wallet_import_start,
-    wallet_import_key, wallet_import_label, wallet_import_passphrase,
-    wallet_remove, wallet_remove_confirm
+    wallet_import_chain_selected, wallet_import_key, wallet_import_label,
+    wallet_import_passphrase, wallet_remove, wallet_remove_confirm,
+    wallet_export_select, wallet_export_execute, wallet_export_passphrase,
 )
 from bot.handlers.whales import (
     whale_menu, whale_page, whale_add_start, whale_add_chain_selected,
@@ -80,7 +85,13 @@ from bot.handlers.sniper import (
 )
 from bot.handlers.admin import (
     admin_menu, admin_broadcast_prompt, admin_broadcast_send, admin_list_users,
-    admin_stop_all, admin_status
+    admin_stop_all, admin_status,
+    admin_keygen_menu, admin_keygen_execute, admin_key_list, admin_revoke_key,
+    admin_user_list, admin_users_page, admin_inspect_user,
+    admin_grant_tier, admin_grant_execute, admin_revoke_sub,
+    admin_ban_user, admin_unban_user,
+    ADMIN_KEY_GEN, ADMIN_KEY_LIST, ADMIN_USER_LIST,
+    ADMIN_USER_INSPECT, ADMIN_GRANT_TIER,
 )
 # New feature handlers
 from bot.handlers.kill_switch import kill_switch_prompt, kill_switch_execute
@@ -120,14 +131,41 @@ async def post_init(app: Application) -> None:
     app.bot_data["db"] = db
     logger.info("Database initialized at %s", settings.db_path)
 
-    # Auth middleware
-    auth = AuthMiddleware(
-        allowed_ids=set(settings.allowed_user_ids_list),
+    # Auth manager (public bot — license key / subscription based)
+    auth = AuthManager(
         admin_id=settings.admin_telegram_id,
-        rate_limit=30,
-        auto_lock_minutes=10,
+        db=db,
     )
+    auth.set_auto_lock(getattr(settings, 'auto_lock_minutes', 10))
     app.bot_data["auth"] = auth
+
+    # Restore subscriptions and license keys from DB into memory
+    db_subs = await db.load_all_subscriptions()
+    from bot.handlers.start import _restore_sub
+    for row in db_subs:
+        _restore_sub(auth, row)
+    logger.info("Restored %d subscriptions from DB", len(db_subs))
+
+    db_keys = await db.load_all_license_keys()
+    from core.auth_manager import LicenseKey
+    from datetime import datetime
+    for row in db_keys:
+        lk = LicenseKey(
+            key=row["key_str"],
+            tier=row["tier"],
+            duration_days=row["duration_days"],
+            created_by=row["created_by"],
+        )
+        if row.get("created_at"):
+            try: lk.created_at = datetime.fromisoformat(row["created_at"])
+            except: pass
+        if row.get("redeemed_by"):
+            lk.redeemed_by = row["redeemed_by"]
+            if row.get("redeemed_at"):
+                try: lk.redeemed_at = datetime.fromisoformat(row["redeemed_at"])
+                except: pass
+        auth._license_keys[lk.key] = lk
+    logger.info("Restored %d license keys from DB", len(db_keys))
 
     # Event queue for whale events → copy engine
     event_queue = asyncio.Queue()
@@ -227,6 +265,10 @@ def build_conversation_handler() -> ConversationHandler:
         states={
             # Authentication
             AUTH_PASSPHRASE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_passphrase)],
+            AUTH_LICENSE_KEY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_license_key_input),
+                CallbackQueryHandler(prompt_license_key, pattern="^redeem_key$"),
+            ],
 
             # Main Dashboard
             DASHBOARD: [
@@ -259,8 +301,8 @@ def build_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(wallet_import_start, pattern="^wallet_import$"),
                 CallbackQueryHandler(wallet_balance, pattern="^wallet_balance$"),
                 CallbackQueryHandler(wallet_remove, pattern="^wallet_remove$"),
+                CallbackQueryHandler(wallet_export_select, pattern="^wallet_export$"),
                 CallbackQueryHandler(show_dashboard, pattern="^menu_dashboard$"),
-                CallbackQueryHandler(wallet_remove_confirm, pattern=r"^wallet_rm_\d+$"),
             ],
             WALLET_CREATE_CHAIN: [
                 CallbackQueryHandler(wallet_create_chain_selected, pattern=r"^chain_select_"),
@@ -269,12 +311,28 @@ def build_conversation_handler() -> ConversationHandler:
             WALLET_CREATE_LABEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, wallet_create_label)],
             WALLET_CREATE_PASSPHRASE: [MessageHandler(filters.TEXT & ~filters.COMMAND, wallet_create_passphrase)],
             WALLET_IMPORT_CHAIN: [
-                CallbackQueryHandler(wallet_import_start, pattern=r"^chain_select_"),
+                CallbackQueryHandler(wallet_import_chain_selected, pattern=r"^chain_select_"),
                 CallbackQueryHandler(wallet_menu, pattern="^menu_wallets$"),
             ],
             WALLET_IMPORT_KEY: [MessageHandler(filters.TEXT & ~filters.COMMAND, wallet_import_key)],
             WALLET_IMPORT_LABEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, wallet_import_label)],
             WALLET_IMPORT_PASSPHRASE: [MessageHandler(filters.TEXT & ~filters.COMMAND, wallet_import_passphrase)],
+            # Wallet Remove
+            WALLET_REMOVE_SELECT: [
+                CallbackQueryHandler(wallet_remove_confirm, pattern=r"^wallet_rm_\d+$"),
+                CallbackQueryHandler(wallet_menu, pattern="^menu_wallets$"),
+            ],
+            WALLET_REMOVE_CONFIRM: [
+                CallbackQueryHandler(wallet_menu, pattern="^menu_wallets$"),
+            ],
+            # Wallet Export
+            WALLET_EXPORT_SELECT: [
+                CallbackQueryHandler(wallet_export_execute, pattern=r"^wallet_exp_\d+$"),
+                CallbackQueryHandler(wallet_menu, pattern="^menu_wallets$"),
+            ],
+            WALLET_EXPORT_PASSPHRASE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, wallet_export_passphrase),
+            ],
 
             # Whale Management
             WHALE_MENU: [
@@ -436,13 +494,44 @@ def build_conversation_handler() -> ConversationHandler:
 
             # Admin
             ADMIN_MENU: [
+                CallbackQueryHandler(admin_keygen_menu, pattern="^admin_keygen$"),
+                CallbackQueryHandler(admin_key_list, pattern="^admin_keylist$"),
+                CallbackQueryHandler(admin_user_list, pattern="^admin_users$"),
                 CallbackQueryHandler(admin_broadcast_prompt, pattern="^admin_broadcast$"),
-                CallbackQueryHandler(admin_list_users, pattern="^admin_users$"),
                 CallbackQueryHandler(admin_stop_all, pattern="^admin_stop_all$"),
                 CallbackQueryHandler(admin_status, pattern="^admin_status$"),
                 CallbackQueryHandler(show_dashboard, pattern="^menu_dashboard$"),
             ],
-            ADMIN_BROADCAST: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_send)],
+            ADMIN_BROADCAST: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_send),
+                CallbackQueryHandler(admin_menu, pattern="^admin$"),
+            ],
+            ADMIN_KEY_GEN: [
+                CallbackQueryHandler(admin_keygen_execute, pattern=r"^admin_key_|^admin_bulk_"),
+                CallbackQueryHandler(admin_keygen_menu, pattern="^admin_keygen$"),
+                CallbackQueryHandler(admin_menu, pattern="^admin$"),
+            ],
+            ADMIN_KEY_LIST: [
+                CallbackQueryHandler(admin_revoke_key, pattern=r"^admin_revoke_key_"),
+                CallbackQueryHandler(admin_menu, pattern="^admin$"),
+            ],
+            ADMIN_USER_LIST: [
+                CallbackQueryHandler(admin_inspect_user, pattern=r"^admin_inspect_"),
+                CallbackQueryHandler(admin_users_page, pattern=r"^admin_users_(prev|next)"),
+                CallbackQueryHandler(admin_menu, pattern="^admin$"),
+            ],
+            ADMIN_USER_INSPECT: [
+                CallbackQueryHandler(admin_grant_tier, pattern=r"^admin_grant_"),
+                CallbackQueryHandler(admin_revoke_sub, pattern=r"^admin_revoke_sub_"),
+                CallbackQueryHandler(admin_ban_user, pattern=r"^admin_ban_"),
+                CallbackQueryHandler(admin_unban_user, pattern=r"^admin_unban_"),
+                CallbackQueryHandler(admin_user_list, pattern="^admin_users$"),
+            ],
+            ADMIN_GRANT_TIER: [
+                CallbackQueryHandler(admin_grant_execute, pattern=r"^admin_grantdo_"),
+                CallbackQueryHandler(admin_inspect_user, pattern=r"^admin_inspect_"),
+                CallbackQueryHandler(admin_user_list, pattern="^admin_users$"),
+            ],
 
             # ── NEW FEATURE STATES ──────────────────────────────────
 

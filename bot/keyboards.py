@@ -34,13 +34,14 @@ def _truncate(address: str, pre: int = 6, suf: int = 4) -> str:
 # Main Dashboard
 # ─────────────────────────────────────────────────────────────────────────────
 
-def main_dashboard_keyboard(is_copy_active: bool, chain: str) -> InlineKeyboardMarkup:
+def main_dashboard_keyboard(is_copy_active: bool, chain: str, is_admin: bool = False) -> InlineKeyboardMarkup:
     """
     Build the main dashboard inline keyboard.
 
     Args:
         is_copy_active: Whether copy trading is currently running.
         chain: Currently selected chain name (ETH/BSC/SOL).
+        is_admin: Whether the user is an admin.
 
     Returns:
         InlineKeyboardMarkup for the dashboard.
@@ -48,7 +49,7 @@ def main_dashboard_keyboard(is_copy_active: bool, chain: str) -> InlineKeyboardM
     copy_icon = "🟢" if is_copy_active else "🔴"
     chain_emoji = CHAIN_INFO.get(chain, {}).get("emoji", "⛓️")
 
-    return InlineKeyboardMarkup([
+    buttons = [
         [InlineKeyboardButton("💰 My Wallets", callback_data="menu_wallets"),
          InlineKeyboardButton("🐋 Whale Wallets", callback_data="menu_whales")],
         [InlineKeyboardButton(f"{chain_emoji} Chain: {chain}", callback_data="menu_chain"),
@@ -63,7 +64,12 @@ def main_dashboard_keyboard(is_copy_active: bool, chain: str) -> InlineKeyboardM
          InlineKeyboardButton("📊 PnL Report", callback_data="menu_pnl")],
         [InlineKeyboardButton("🚨 KILL SWITCH", callback_data="menu_kill_switch"),
          InlineKeyboardButton("🔄 Refresh", callback_data="menu_dashboard")],
-    ])
+    ]
+    
+    if is_admin:
+        buttons.append([InlineKeyboardButton("👑 Admin Panel", callback_data="admin")])
+        
+    return InlineKeyboardMarkup(buttons)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

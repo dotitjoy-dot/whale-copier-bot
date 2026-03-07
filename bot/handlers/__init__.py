@@ -13,9 +13,11 @@ from bot.handlers.start import start_command, handle_passphrase, show_dashboard
 from bot.handlers.wallet import (
     wallet_menu, wallet_create_chain, wallet_create_chain_selected,
     wallet_create_label, wallet_create_passphrase,
-    wallet_import_start, wallet_import_key, wallet_import_label,
+    wallet_import_start, wallet_import_chain_selected,
+    wallet_import_key, wallet_import_label,
     wallet_import_passphrase, wallet_balance,
     wallet_remove, wallet_remove_confirm,
+    wallet_export_select, wallet_export_execute, wallet_export_passphrase,
 )
 
 # Whales

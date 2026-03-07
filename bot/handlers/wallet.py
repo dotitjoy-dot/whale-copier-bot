@@ -338,3 +338,155 @@ async def wallet_remove_confirm(update: Update, context: ContextTypes.DEFAULT_TY
     await db.remove_wallet(wallet_id, user_id)
     await query.edit_message_text("✅ Wallet removed.", reply_markup=back_button("menu_wallets"))
     return WALLET_MENU
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Wallet Export Flow
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def wallet_export_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Prompt user to select a wallet to export."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    db = context.bot_data.get("db")
+    wallets = await wallet_manager.list_user_wallets(db, user_id)
+
+    if not wallets:
+        await query.edit_message_text("No wallets to export.", reply_markup=back_button("menu_wallets"))
+        return WALLET_MENU
+
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    buttons = []
+    for w in wallets:
+        chain_emoji = CHAIN_INFO.get(w["chain"], {}).get("emoji", "")
+        buttons.append([InlineKeyboardButton(
+            f"📤 {chain_emoji} {w['label']}: {w['address_masked']}",
+            callback_data=f"wallet_exp_{w['wallet_id']}"
+        )])
+    buttons.append([InlineKeyboardButton("◀️ Back", callback_data="menu_wallets")])
+
+    await query.edit_message_text(
+        "📤 <b>Export Wallet</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "Select wallet to export its private key:\n\n"
+        "⚠️ <b>WARNING:</b> Never share your private key!",
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode="HTML",
+    )
+    return WALLET_EXPORT_SELECT
+
+
+async def wallet_export_execute(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle wallet selection for export — check passphrase or execute directly."""
+    query = update.callback_query
+    await query.answer()
+
+    wallet_id = int(query.data.replace("wallet_exp_", ""))
+    context.user_data["export_wallet_id"] = wallet_id
+
+    # Check if we have a session passphrase
+    auth = context.bot_data.get("auth")
+    user_id = update.effective_user.id
+    passphrase = auth.get_session_passphrase(user_id) if auth else ""
+
+    if passphrase:
+        return await _do_export(update, context, passphrase)
+
+    await query.edit_message_text(
+        "🔐 Enter your wallet passphrase to decrypt the private key:\n"
+        "(Message will be deleted for security)",
+    )
+    return WALLET_EXPORT_PASSPHRASE
+
+
+async def wallet_export_passphrase(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle passphrase input for export."""
+    passphrase = update.message.text.strip()
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    return await _do_export(update, context, passphrase)
+
+
+async def _do_export(update: Update, context: ContextTypes.DEFAULT_TYPE, passphrase: str) -> int:
+    """Decrypt and display recovery phrase + private key for export."""
+    db = context.bot_data.get("db")
+    wallet_id = context.user_data.get("export_wallet_id")
+
+    if not wallet_id:
+        await update.effective_chat.send_message("❌ No wallet selected.", reply_markup=back_button("menu_wallets"))
+        return WALLET_MENU
+
+    try:
+        export = await wallet_manager.export_wallet_full(db, wallet_id, passphrase)
+
+        chain = export["chain"]
+        address = export["address"]
+        label = export["label"]
+        mnemonic = export.get("mnemonic", "")
+        private_key = export["private_key"]
+        derivation_path = export["derivation_path"]
+        compatible = export["compatible_wallets"]
+
+        chain_name = CHAIN_INFO.get(chain, {}).get("name", chain)
+
+        text = (
+            "📤 <b>WALLET EXPORT</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⛓️ Chain: {chain_name}\n"
+            f"🏷️ Label: {label}\n"
+            f"📍 Address:\n<code>{address}</code>\n\n"
+        )
+
+        if mnemonic:
+            text += (
+                "📝 <b>RECOVERY PHRASE (12 words):</b>\n"
+                f"<tg-spoiler>{mnemonic}</tg-spoiler>\n\n"
+                f"🔀 Derivation Path: <code>{derivation_path}</code>\n\n"
+            )
+        else:
+            text += (
+                "📝 <i>Recovery phrase not available</i>\n"
+                "<i>(Wallet was imported via private key only)</i>\n\n"
+            )
+
+        text += (
+            f"🔑 <b>PRIVATE KEY:</b>\n"
+            f"<tg-spoiler>{private_key}</tg-spoiler>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"✅ <b>Compatible with:</b>\n"
+            f"   {compatible}\n\n"
+            "⚠️ <b>SECURITY WARNING:</b>\n"
+            "• Never share these with anyone\n"
+            "• This message auto-deletes in 60s\n"
+            "• Store offline in a safe place\n"
+            "• Recovery phrase works across\n"
+            "  all BIP-39 compatible wallets"
+        )
+
+        msg = await update.effective_chat.send_message(text, parse_mode="HTML")
+
+        # Auto-delete the sensitive message after 60 seconds
+        import asyncio
+        async def _auto_delete():
+            await asyncio.sleep(60)
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+
+        asyncio.create_task(_auto_delete())
+
+    except Exception as exc:
+        await update.effective_chat.send_message(
+            f"❌ Export failed: {exc}\n\n"
+            "Check your passphrase and try again.",
+            reply_markup=back_button("menu_wallets"),
+        )
+
+    context.user_data.pop("export_wallet_id", None)
+    return await wallet_menu(update, context)

@@ -177,7 +177,8 @@ async def auth_check(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool
         True if the user can proceed, False otherwise.
     """
     user_id = update.effective_user.id if update.effective_user else 0
-    auth: AuthMiddleware = context.bot_data.get("auth")
+    from core.auth_manager import AuthManager
+    auth: AuthManager = context.bot_data.get("auth")
 
     if not auth:
         return False
