@@ -59,7 +59,7 @@ class NansenSmartMoneyUpdater:
         # Nansen DEX Trades endpoint (Smart Money)
         # Note: Exact endpoint path should be verified against Nansen's docs.
         # This is a conceptual implementation of their standard Smart Money endpoint.
-        url = "https://pro-api.nansen.ai/v1/smart-money/dex-trades"
+        url = "https://api.nansen.ai/api/v1/smart-money/dex-trades"
         headers = {
             "api-key": self.api_key,
             "accept": "application/json"
@@ -94,4 +94,5 @@ class NansenSmartMoneyUpdater:
                         logger.error("Nansen API Error %d: %s", resp.status, resp_text)
         except Exception as e:
             logger.error("Failed to connect to Nansen API: %s", e)
+
 
