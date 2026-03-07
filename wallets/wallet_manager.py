@@ -2,7 +2,7 @@
 HD Wallet Manager — creates, imports, exports, and manages EVM + Solana wallets.
 Private keys are ALWAYS stored AES-256-GCM encrypted. They are decrypted only
 in memory for the duration of a single operation, then garbage collected.
-Mnemonics are shown ONCE at creation and never stored.
+Mnemonics are encrypted and stored alongside private keys for export/recovery.
 """
 
 from __future__ import annotations
@@ -70,11 +70,12 @@ async def create_evm_wallet(
     address = account.address
     private_key_hex = account.key.hex()
 
-    # Encrypt private key — NEVER store plaintext
+    # Encrypt private key and mnemonic — NEVER store plaintext
     encrypted_pk = encrypt_private_key(private_key_hex, passphrase)
+    encrypted_mnemonic = encrypt_private_key(mnemonic_str, passphrase)
 
     # Store in database
-    wallet_id = await db.add_wallet(telegram_id, chain, address, encrypted_pk, label)
+    wallet_id = await db.add_wallet(telegram_id, chain, address, encrypted_pk, label, encrypted_mnemonic)
 
     logger.info("Created EVM wallet %s for user %d on %s", _truncate_address(address), telegram_id, chain)
 
@@ -139,10 +140,11 @@ async def create_solana_wallet(
     keypair = Keypair.from_seed(secret_key_bytes)
     address = str(keypair.pubkey())
 
-    # Encrypt the 32-byte seed (hex-encoded)
+    # Encrypt the 32-byte seed (hex-encoded) and mnemonic
     encrypted_pk = encrypt_private_key(secret_key_bytes.hex(), passphrase)
+    encrypted_mnemonic = encrypt_private_key(mnemonic_str, passphrase)
 
-    wallet_id = await db.add_wallet(telegram_id, "SOL", address, encrypted_pk, label)
+    wallet_id = await db.add_wallet(telegram_id, "SOL", address, encrypted_pk, label, encrypted_mnemonic)
 
     logger.info("Created Solana wallet %s for user %d", _truncate_address(address), telegram_id)
 
@@ -304,36 +306,72 @@ async def get_wallet_balance(
         raise ValueError(f"Unsupported chain: {chain}")
 
 
-async def export_wallet_encrypted(
+async def export_wallet_full(
     db: Database, wallet_id: int, passphrase: str
-) -> str:
+) -> Dict:
     """
-    Export wallet as a JSON-encrypted backup string.
-    The exported JSON can be re-imported on another device.
+    Export wallet with decrypted recovery phrase and private key in
+    formats compatible with all hot/cold wallets (MetaMask, Phantom,
+    Trust Wallet, Ledger, etc.).
 
     Args:
         db: Database instance.
         wallet_id: Wallet to export.
-        passphrase: Passphrase to verify decryption (re-encrypts in export).
+        passphrase: Passphrase to decrypt secrets.
 
     Returns:
-        JSON string containing wallet metadata and encrypted private key.
+        Dict with chain, address, label, private_key, mnemonic,
+        and wallet-compatible format hints.
     """
     wallet = await db.get_wallet(wallet_id)
     if not wallet:
         raise ValueError(f"Wallet {wallet_id} not found")
 
-    # Verify passphrase by attempting decryption
-    _ = decrypt_private_key(wallet["encrypted_pk"], passphrase)
+    chain = wallet["chain"]
+    address = wallet["address"]
+    label = wallet["label"]
 
-    export_data = {
-        "version": "1.0",
-        "chain": wallet["chain"],
-        "address": wallet["address"],
-        "label": wallet["label"],
-        "encrypted_pk": wallet["encrypted_pk"],  # Re-export encrypted blob
+    # Decrypt private key
+    raw_pk = decrypt_private_key(wallet["encrypted_pk"], passphrase)
+
+    # Decrypt mnemonic (may be empty for imported wallets)
+    mnemonic = ""
+    enc_mnemonic = wallet.get("encrypted_mnemonic") or ""
+    if enc_mnemonic:
+        try:
+            mnemonic = decrypt_private_key(enc_mnemonic, passphrase)
+        except Exception:
+            mnemonic = ""  # Imported wallet — no mnemonic stored
+
+    # Format private key for wallet compatibility
+    if chain in ("ETH", "BSC"):
+        # EVM wallets expect 0x-prefixed hex
+        pk_display = raw_pk if raw_pk.startswith("0x") else f"0x{raw_pk}"
+        derivation_path = "m/44'/60'/0'/0/0"
+        compatible_wallets = "MetaMask, Trust Wallet, Rabby, Ledger, Trezor"
+    else:
+        # Solana wallets expect base58-encoded key
+        import base58
+        pk_bytes = bytes.fromhex(raw_pk)
+        if len(pk_bytes) == 32:
+            # Need 64-byte format (secret + pubkey) for Phantom/Solflare
+            from solders.keypair import Keypair  # type: ignore
+            kp = Keypair.from_seed(pk_bytes)
+            pk_display = base58.b58encode(bytes(kp)).decode()
+        else:
+            pk_display = base58.b58encode(pk_bytes).decode()
+        derivation_path = "m/44'/501'/0'/0'"
+        compatible_wallets = "Phantom, Solflare, Trust Wallet, Ledger"
+
+    return {
+        "chain": chain,
+        "address": address,
+        "label": label,
+        "mnemonic": mnemonic,
+        "private_key": pk_display,
+        "derivation_path": derivation_path,
+        "compatible_wallets": compatible_wallets,
     }
-    return json.dumps(export_data, indent=2)
 
 
 async def list_user_wallets(db: Database, telegram_id: int) -> List[Dict]:
