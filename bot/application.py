@@ -50,7 +50,8 @@ from bot.handlers.copy import (
 )
 from bot.handlers.settings import (
     settings_menu, filters_menu, filter_toggle_buys, filter_toggle_sells,
-    filter_min_whale_prompt, filter_min_whale_set, filter_toggle_anti_rug
+    filter_min_whale_prompt, filter_min_whale_set, filter_toggle_anti_rug,
+    filter_toggle_smart_money
 )
 from bot.handlers.money_mgmt import (
     money_menu, money_mode_select, money_mode_set, money_fixed_prompt, money_fixed_set,
@@ -192,6 +193,14 @@ async def post_init(app: Application) -> None:
     sniper = AutoSniper(db, event_queue)
     await sniper.start()
     app.bot_data["auto_sniper"] = sniper
+    
+    # Nansen Smart Money API polling (Background task directly interacting with DB)
+    from monitor.nansen import NansenSmartMoneyUpdater
+    import os
+    nansen_api_key = os.getenv("NANSEN_API_KEY", "")
+    nansen_updater = NansenSmartMoneyUpdater(db, nansen_api_key)
+    await nansen_updater.start()
+    app.bot_data["nansen_updater"] = nansen_updater
 
     # Scheduler — whale polling every 15 seconds
     scheduler = Scheduler()
@@ -379,6 +388,7 @@ def build_conversation_handler() -> ConversationHandler:
             ],
             FILTERS_MENU: [
                 CallbackQueryHandler(filter_toggle_anti_rug, pattern="^filter_toggle_anti_rug$"),
+                CallbackQueryHandler(filter_toggle_smart_money, pattern="^filter_toggle_smart_money$"),
                 CallbackQueryHandler(filter_toggle_buys, pattern="^filter_toggle_buys$"),
                 CallbackQueryHandler(filter_toggle_sells, pattern="^filter_toggle_sells$"),
                 CallbackQueryHandler(filter_min_whale_prompt, pattern="^filter_min_whale$"),

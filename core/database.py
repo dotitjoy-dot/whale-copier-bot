@@ -313,6 +313,8 @@ class Database:
             "ALTER TABLE copy_config ADD COLUMN snooze_until TEXT DEFAULT ''",
             # Multi-Wallet Rotation
             "ALTER TABLE copy_config ADD COLUMN wallet_rotation_enabled INTEGER DEFAULT 0",
+            # Smart Money Nansen integration
+            "ALTER TABLE copy_config ADD COLUMN smart_money_enabled INTEGER DEFAULT 0",
             # Trade: break-even tracking
             "ALTER TABLE trades ADD COLUMN breakeven_activated INTEGER DEFAULT 0",
             "ALTER TABLE trades ADD COLUMN peak_price_usd REAL DEFAULT 0",
@@ -485,12 +487,17 @@ class Database:
     async def get_users_tracking_whale(self, chain: str, whale_address: str) -> List[Dict]:
         """Get all users (with their copy_config) that track a given whale on a chain."""
         return await self._fetchall(
-            """SELECT u.telegram_id, u.username, cc.*
-               FROM whale_wallets ww
-               JOIN users u ON u.telegram_id = ww.telegram_id
-               LEFT JOIN copy_config cc ON cc.telegram_id = u.telegram_id AND cc.chain = ww.chain
-               WHERE ww.address=? AND ww.chain=? AND ww.is_active=1 AND u.is_active=1""",
-            (whale_address, chain),
+            """
+            SELECT u.telegram_id, u.username, cc.*
+            FROM users u
+            JOIN copy_config cc ON cc.telegram_id = u.telegram_id AND cc.chain = ?
+            WHERE u.is_active=1 AND cc.is_enabled=1 AND (
+                EXISTS (SELECT 1 FROM whale_wallets ww WHERE ww.telegram_id = u.telegram_id AND ww.chain=? AND ww.address=? AND ww.is_active=1)
+                OR
+                (cc.smart_money_enabled=1 AND EXISTS (SELECT 1 FROM whale_wallets nansen WHERE nansen.telegram_id=0 AND nansen.chain=? AND nansen.address=? AND nansen.is_active=1))
+            )
+            """,
+            (chain, chain, whale_address, chain, whale_address),
         )
 
     # ── Copy Config ───────────────────────────────────────────────────────────

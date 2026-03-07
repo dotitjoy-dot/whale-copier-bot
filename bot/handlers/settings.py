@@ -375,11 +375,13 @@ async def filters_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     copy_buys = "✅" if config.get("copy_buys", 1) else "❌"
     copy_sells = "✅" if config.get("copy_sells", 1) else "❌"
     anti_rug = "✅" if config.get("anti_rug_enabled", 1) else "❌"
+    smart_money = "✅" if config.get("smart_money_enabled", 0) else "❌"
 
     text = (
         "🔍 <b>TRADE FILTERS & SECURITY</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🛡️ Anti-Rug/Honeypot Checker: {anti_rug}\n"
+        f"🧠 Copy Nansen Smart Money: {smart_money}\n"
         f"💰 Min whale trade: ${min_whale:.0f}\n"
         f"🟢 Copy buys: {copy_buys}\n"
         f"🔴 Copy sells: {copy_sells}\n"
@@ -387,6 +389,7 @@ async def filters_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
     buttons = [
         [InlineKeyboardButton(f"🛡️ Anti-Rug/Honeypot: {anti_rug}", callback_data="filter_toggle_anti_rug")],
+        [InlineKeyboardButton(f"🧠 Smart Money: {smart_money}", callback_data="filter_toggle_smart_money")],
         [InlineKeyboardButton(f"💰 Min Whale Trade: ${min_whale:.0f}", callback_data="filter_min_whale")],
         [InlineKeyboardButton(f"🟢 Copy Buys: {copy_buys}", callback_data="filter_toggle_buys")],
         [InlineKeyboardButton(f"🔴 Copy Sells: {copy_sells}", callback_data="filter_toggle_sells")],
@@ -452,3 +455,27 @@ async def filter_min_whale_set(update: Update, context: ContextTypes.DEFAULT_TYP
     return await _set_numeric_config(
         update, context, "min_whale_trade_usd", "Min Whale Trade", 1, 1000000, FILTER_MIN_WHALE
     )
+
+async def filter_toggle_smart_money(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Toggle Nansen Smart Money tracking."""
+    query = update.callback_query
+    
+    user_id = update.effective_user.id
+    db = context.bot_data.get("db")
+    chain = context.user_data.get("chain", "ETH")
+    config = await db.get_copy_config(user_id, chain) or {}
+    
+    auth = context.bot_data.get("auth")
+    if auth:
+        sub = auth.get_subscription(user_id)
+        if sub.tier == "FREE":
+            await query.answer("⚠️ Smart Money feed requires PRO or ELITE tier.", show_alert=True)
+            return SETTINGS_MENU
+
+    await query.answer()
+
+    current = config.get("smart_money_enabled", 0)
+    new_val = 0 if current else 1
+
+    await db.upsert_copy_config(user_id, chain, {"smart_money_enabled": new_val})
+    return await filters_menu(update, context)
