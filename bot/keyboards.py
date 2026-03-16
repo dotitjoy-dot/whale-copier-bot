@@ -61,9 +61,10 @@ def main_dashboard_keyboard(is_copy_active: bool, chain: str, is_admin: bool = F
         [InlineKeyboardButton("🔔 Price Alerts", callback_data="menu_alerts_price"),
          InlineKeyboardButton("🛡️ Token Audit", callback_data="menu_audit")],
         [InlineKeyboardButton("⚙️ Settings", callback_data="menu_settings"),
-         InlineKeyboardButton("📊 PnL Report", callback_data="menu_pnl")],
-        [InlineKeyboardButton("🚨 KILL SWITCH", callback_data="menu_kill_switch"),
-         InlineKeyboardButton("🔄 Refresh", callback_data="menu_dashboard")],
+         InlineKeyboardButton("💎 Account", callback_data="menu_account")],
+        [InlineKeyboardButton("📊 PnL Report", callback_data="menu_pnl"),
+         InlineKeyboardButton("🚨 KILL SWITCH", callback_data="menu_kill_switch")],
+        [InlineKeyboardButton("🔄 Refresh", callback_data="menu_dashboard")],
     ]
     
     if is_admin:
@@ -458,6 +459,19 @@ def partial_tp_keyboard(steps: list, enabled: bool) -> InlineKeyboardMarkup:
         InlineKeyboardButton("🏠 Main Menu", callback_data="menu_dashboard"),
     ])
     return InlineKeyboardMarkup(buttons)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Account / Subscription
+# ─────────────────────────────────────────────────────────────────────────────
+
+def account_menu_keyboard() -> InlineKeyboardMarkup:
+    """Build the account/subscription management menu keyboard."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔑 Redeem License Key", callback_data="redeem_key")],
+        [InlineKeyboardButton("◀️ Back", callback_data="menu_dashboard"),
+         InlineKeyboardButton("🏠 Main Menu", callback_data="menu_dashboard")],
+    ])
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -30,7 +30,6 @@ from trading.limit_order_monitor import LimitOrderMonitor
 from bot.handlers.start import (
     start_command, handle_passphrase, show_dashboard,
     handle_license_key_input, prompt_license_key,
-    AUTH_LICENSE_KEY,
 )
 from bot.handlers.chains import chain_select_callback, chain_switch_callback
 from bot.handlers.wallet import (
@@ -120,6 +119,7 @@ from bot.handlers.extras import (
     cooldown_prompt, cooldown_set,
     wallet_rotation_menu, wallet_rotation_toggle,
 )
+from bot.handlers.account import account_menu, redeem_key_prompt, redeem_key_handle
 
 logger = get_logger(__name__)
 
@@ -274,11 +274,6 @@ def build_conversation_handler() -> ConversationHandler:
         states={
             # Authentication
             AUTH_PASSPHRASE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_passphrase)],
-            AUTH_LICENSE_KEY: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_license_key_input),
-                CallbackQueryHandler(prompt_license_key, pattern="^redeem_key$"),
-            ],
-
             # Main Dashboard
             DASHBOARD: [
                 CallbackQueryHandler(wallet_menu, pattern="^menu_wallets$"),
@@ -296,6 +291,7 @@ def build_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(price_alert_menu, pattern="^menu_alerts_price$"),
                 CallbackQueryHandler(token_audit_prompt, pattern="^menu_audit$"),
                 CallbackQueryHandler(portfolio_menu, pattern="^menu_portfolio$"),
+                CallbackQueryHandler(account_menu, pattern="^menu_account$"),
             ],
 
             # Chain Switcher
@@ -610,6 +606,18 @@ def build_conversation_handler() -> ConversationHandler:
             LIMIT_ORDER_TOKEN: [MessageHandler(filters.TEXT & ~filters.COMMAND, limit_token_set)],
             LIMIT_ORDER_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, limit_price_set)],
             LIMIT_ORDER_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, limit_amount_set)],
+
+            # Account / License Key
+            ACCOUNT_MENU: [
+                CallbackQueryHandler(redeem_key_prompt, pattern="^redeem_key$"),
+                CallbackQueryHandler(account_menu, pattern="^menu_account$"),
+                CallbackQueryHandler(show_dashboard, pattern="^menu_dashboard$"),
+            ],
+            ACCOUNT_LICENSE_KEY: [
+                CallbackQueryHandler(redeem_key_prompt, pattern="^redeem_key$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, redeem_key_handle),
+                CallbackQueryHandler(show_dashboard, pattern="^menu_dashboard$"),
+            ],
 
             # Portfolio Heatmap
             PORTFOLIO_MENU: [

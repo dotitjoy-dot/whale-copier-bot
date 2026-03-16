@@ -150,6 +150,7 @@ SNOOZE_SET = 280
 AUTH_PASSPHRASE = 200
 AUTH_CONFIRM = 201
 
-# ── Typing input (general-purpose) ──────────────────────────────────────────
-TYPING_INPUT = 999
+# ── Account / License Key ────────────────────────────────────────────────────
+ACCOUNT_MENU = 300
+ACCOUNT_LICENSE_KEY = 301
 

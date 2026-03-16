@@ -20,9 +20,9 @@ from core.logger import get_logger
 
 logger = get_logger(__name__)
 
+from bot.menus import ACCOUNT_LICENSE_KEY, DASHBOARD
 # States
 AUTH_PASSPHRASE  = 200
-AUTH_LICENSE_KEY = 201
 DASHBOARD_STATE  = 1
 
 
@@ -119,7 +119,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             ]]),
             parse_mode="HTML",
         )
-        return AUTH_LICENSE_KEY
+        return ACCOUNT_LICENSE_KEY
 
     # Active user — check session
     if auth.is_session_locked(user_id):
@@ -205,7 +205,7 @@ async def handle_license_key_input(update: Update, context: ContextTypes.DEFAULT
             ]]),
             parse_mode="HTML",
         )
-        return AUTH_LICENSE_KEY
+        return ACCOUNT_LICENSE_KEY
 
 
 async def prompt_license_key(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -218,7 +218,7 @@ async def prompt_license_key(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "Format: <code>PRO-XXXX-XXXX-XXXX</code> or <code>ELITE-XXXX-XXXX-XXXX</code>",
         parse_mode="HTML",
     )
-    return AUTH_LICENSE_KEY
+    return ACCOUNT_LICENSE_KEY
 
 
 async def show_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
